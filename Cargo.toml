@@ -24,6 +24,7 @@ tokio-test = "0.4"
 criterion = { version = "0.5", features = ["async_tokio"] }
 assert2 = "0.3"
 mockall = "0.13"
+futures = "0.3"
 
 [[bench]]
 name = "compare"
