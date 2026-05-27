@@ -14,6 +14,7 @@ pub struct ProxyConfig {
     pub connect_timeout: Duration,
     pub pool_max_size: usize,
     pub pool_idle_timeout: Duration,
+    pub ca_certs: Vec<Vec<u8>>,
 }
 
 impl ProxyConfig {
@@ -24,6 +25,7 @@ impl ProxyConfig {
             connect_timeout: Duration::from_secs(5),
             pool_max_size: 16,
             pool_idle_timeout: Duration::from_secs(60),
+            ca_certs: Vec::new(),
         }
     }
 }
@@ -34,6 +36,7 @@ pub struct ProxyConfigBuilder {
     connect_timeout: Duration,
     pool_max_size: usize,
     pool_idle_timeout: Duration,
+    ca_certs: Vec<Vec<u8>>,
 }
 
 impl ProxyConfigBuilder {
@@ -50,6 +53,10 @@ impl ProxyConfigBuilder {
         self.pool_idle_timeout = idle;
         self
     }
+    pub fn with_ca_cert(mut self, cert: Vec<u8>) -> Self {
+        self.ca_certs.push(cert);
+        self
+    }
     pub fn build(self) -> ProxyConfig {
         ProxyConfig {
             proxy_url: self.proxy_url,
@@ -57,6 +64,7 @@ impl ProxyConfigBuilder {
             connect_timeout: self.connect_timeout,
             pool_max_size: self.pool_max_size,
             pool_idle_timeout: self.pool_idle_timeout,
+            ca_certs: self.ca_certs,
         }
     }
 }

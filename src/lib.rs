@@ -5,7 +5,9 @@
 pub mod config;
 pub mod error;
 pub mod proxy;
+pub mod tls;
 
 pub use config::{ProxyConfig, ProxyAuth};
 pub use error::{ProxyError, ProxyResult};
 pub use proxy::ProxyConnector;
+pub use tls::TlsManager;
