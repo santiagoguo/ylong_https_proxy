@@ -1,0 +1,23 @@
+[package]
+name = "ylong_https_proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+hyper-rustls = { version = "0.27", features = ["http1"] }
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+url = "2.5"
+http = "1.1"
+base64 = "0.22"
+webpki-roots = "0.26"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "proxy_bench"
+harness = false
