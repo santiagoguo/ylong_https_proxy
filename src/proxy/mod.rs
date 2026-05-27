@@ -5,6 +5,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 
+pub mod io;
+pub use io::pipe_streams;
+
 pub struct ProxyConnector {
     config: ProxyConfig,
 }

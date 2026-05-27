@@ -1,6 +1,5 @@
 use crate::config::ProxyConfig;
 use crate::error::{ProxyError, ProxyResult};
-use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName};
 use std::sync::Arc;
 use tokio::net::TcpStream;
