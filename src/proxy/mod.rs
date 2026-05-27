@@ -18,33 +18,33 @@ impl ProxyConnector {
     pub async fn connect(&self, target: &Uri) -> ProxyResult<TcpStream> {
         let proxy_host = self.config.proxy_url.host_str()
             .ok_or_else(|| ProxyError::InvalidUrl("Missing proxy host".into()))?;
-        let proxy_port = self.config.proxy_url.port_u16().unwrap_or(8080);
+        let proxy_port = self.config.proxy_url.port().unwrap_or(8080);
 
         info!("Connecting to proxy {}:{} -> {}:{}", 
             proxy_host, proxy_port, 
             target.host().unwrap_or("unknown"), 
-            target.port_u16().unwrap_or(443));
+            target.port().map(|p| p.as_u16()).unwrap_or(443));
 
         // 1. TCP Connect to Proxy with Timeout
-        let stream = tokio::time::timeout(
+        let mut stream = tokio::time::timeout(
             self.config.connect_timeout,
             TcpStream::connect((proxy_host, proxy_port))
         ).await.map_err(|_| ProxyError::Timeout)??;
 
         // 2. Perform CONNECT Handshake
-        Self::execute_connect(&stream, target, &self.config).await?;
+        Self::execute_connect(&mut stream, target, &self.config).await?;
         
         info!("HTTPS Proxy tunnel established successfully");
         Ok(stream)
     }
 
     async fn execute_connect(
-        stream: &TcpStream, 
+        stream: &mut TcpStream, 
         target: &Uri, 
         config: &ProxyConfig
     ) -> ProxyResult<()> {
         let host = target.host().ok_or_else(|| ProxyError::InvalidUrl("Missing target host".into()))?;
-        let port = target.port_u16().unwrap_or(443);
+        let port = target.port().map(|p| p.as_u16()).unwrap_or(443);
 
         // Construct CONNECT request
         let mut req = format!("CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\n", host, port, host, port);
@@ -58,17 +58,15 @@ impl ProxyConnector {
         req.push_str("\r\n");
 
         debug!("Sending CONNECT request");
-        let mut write_stream = stream;
-        write_stream.write_all(req.as_bytes()).await?;
+        stream.write_all(req.as_bytes()).await?;
 
         // Read Response State Machine
-        let mut reader = stream;
         let mut buffer = Vec::with_capacity(512);
         let mut temp = [0u8; 256];
         
         // Read until \r\n\r\n (HTTP Headers end)
         loop {
-            let n = reader.read(&mut temp).await?;
+            let n = stream.read(&mut temp).await?;
             if n == 0 {
                 return Err(ProxyError::ConnectionClosed);
             }
