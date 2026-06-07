@@ -57,12 +57,9 @@ async fn run_bench(concurrency: usize, connector: Arc<ProxyConnector>) {
     let mut success_count = 0;
 
     for h in handles {
-        match h.await {
-            Ok(duration) => {
-                total_time += duration;
-                success_count += 1;
-            }
-            Err(_) => {}
+        if let Ok(duration) = h.await {
+            total_time += duration;
+            success_count += 1;
         }
     }
 
