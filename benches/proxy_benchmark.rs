@@ -23,11 +23,7 @@ async fn run_mock_proxy(addr: SocketAddr) -> std::io::Result<()> {
             let mut buf = [0u8; 1024];
             // Read until we get \r\n\r\n (HTTP headers end)
             let mut headers = Vec::new();
-            loop {
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) => n,
-                    Err(_) => break,
-                };
+            while let Ok(n) = stream.read(&mut buf).await {
                 headers.extend_from_slice(&buf[..n]);
                 if let Some(_pos) = headers.windows(4).position(|w| w == b"\r\n\r\n") {
                     let response = b"HTTP/1.1 200 Connection Established\r\n\r\n";
@@ -42,12 +38,7 @@ async fn run_mock_proxy(addr: SocketAddr) -> std::io::Result<()> {
 fn proxy_connect_benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     
-    // Start mock proxy on a random port
-    // We use a channel to signal that the server is ready
-    let (tx, rx) = std::sync::mpsc::channel::<SocketAddr>();
-    
-    // We can't easily pass the channel to the async task and block the main thread.
-    // Let's just pick a fixed port.
+    // Start mock proxy on a fixed port
     let port = 19998;
     let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
     

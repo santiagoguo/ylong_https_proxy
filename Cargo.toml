@@ -1,7 +1,9 @@
 [package]
 name = "ylong_https_proxy"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+description = "High-performance asynchronous HTTPS proxy module in Rust"
+license = "Apache-2.0"
 
 [dependencies]
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -15,7 +17,6 @@ url = "2.5"
 base64 = "0.22"
 webpki-roots = "0.26"
 deadpool = { version = "0.12", features = ["rt_tokio_1"] }
-# dashmap = { version = "6", features = ["inline"] }
 async-trait = "0.1"
 tracing = "0.1"
 thiserror = "2.0"
@@ -28,15 +29,9 @@ mockall = "0.13"
 futures = "0.3"
 
 [[bench]]
-name = "compare"
-harness = false
-
-[[bench]]
 name = "proxy_benchmark"
 harness = false
-edition = "2021"
 
 [[bin]]
 name = "perf_bench"
 path = "src/bin/perf_bench.rs"
-edition = "2024"
