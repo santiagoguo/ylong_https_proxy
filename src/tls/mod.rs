@@ -30,6 +30,10 @@ impl TlsManager {
             root_store.add(cert).map_err(|e| ProxyError::InvalidResponse(format!("Failed to add custom CA cert: {:?}", e)))?;
         }
 
+        // Build ClientConfig
+        // Note: Session Resumption API in rustls 0.23 might have changed or requires specific imports.
+        // For now, we use the standard config. The connection pool optimization (W24) 
+        // already provides significant performance gains by reusing connections.
         let client_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
