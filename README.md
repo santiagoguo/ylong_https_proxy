@@ -75,10 +75,14 @@ let config = ProxyConfig::builder(proxy_url)
 ## 🏗️ Architecture
 
 ### Sharded Connection Pool
-To eliminate lock contention under high concurrency, we use a **64-shard** architecture (`Vec<RwLock<HashMap>>`). Connections are distributed via hashing, ensuring that concurrent requests to different targets rarely block each other.
+To eliminate lock contention under high concurrency, this module uses a **64-shard** architecture (`Vec<RwLock<HashMap>>`). Connections are distributed via hashing, ensuring that concurrent requests to different targets rarely block each other.
 
 ### Zero-Copy IO
 Data forwarding between the client and the upstream server is handled by Tokio's optimized `copy_bidirectional`, minimizing memory allocations and context switches.
+
+## 👤 Author
+
+Developed by [santiagoguo](https://github.com/santiagoguo).
 
 ## 📝 License
 
