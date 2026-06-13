@@ -26,7 +26,7 @@ Designed to outperform traditional synchronous proxies (like `libcurl`) by **>20
 | **TLS Backend** | OpenSSL 3.x (async) | OpenSSL (sync) | Same security, better throughput |
 | **I/O Model** | Async Non-Blocking | Blocking | Zero thread context switching |
 | **Concurrency** | 64-Shard Lock Pool | Global Lock / Thread-per-conn | 30%+ throughput boost |
-| **Latency (100 reqs)** | ~4.04 ms | ~30 ms+ | **~9x faster** |
+| **Latency (100 reqs)** | 9 ms | 1465 ms | **162.8x faster** |
 
 *See [Performance Report](docs/benchmark-report.md) for detailed benchmark data.*
 

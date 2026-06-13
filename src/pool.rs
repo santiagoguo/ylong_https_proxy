@@ -9,11 +9,12 @@
 //!    for lock-free concurrent reads/writes.
 //! 2. Implements TTL (Time-To-Live) eviction to remove stale connections.
 //! 3. Implements basic health checks (liveness) before returning a pooled connection.
+//! 4. Uses ProtocolRegistry for extensible proxy protocol support.
 
 use crate::config::ProxyConfig;
 use crate::error::ProxyResult;
+use crate::proxy::{ProxyConnector, ProxyProtocol, ProxyProtocolType, ProtocolRegistry};
 use crate::tls::TlsManager;
-use crate::proxy::ProxyConnector;
 use http::Uri;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -36,18 +37,29 @@ struct PooledConnection {
 const SHARDS: usize = 64;
 
 /// A high-performance HTTPS Proxy Client with connection pooling capabilities.
+///
+/// Uses a `ProtocolRegistry` to manage proxy protocol implementations,
+/// allowing users to register custom protocols (e.g., SOCKS5) alongside
+/// the default HTTP CONNECT tunnel.
 pub struct ProxyClient {
     config: ProxyConfig,
-    connector: ProxyConnector,
+    protocol_registry: ProtocolRegistry,
+    default_protocol: ProxyProtocolType,
     tls_manager: TlsManager,
     // Array of RwLock<HashMap> acting as shards
     shards: Vec<RwLock<HashMap<String, PooledConnection>>>,
 }
 
 impl ProxyClient {
+    /// Create a new proxy client with the default HTTP CONNECT protocol.
+    ///
+    /// Automatically registers the HTTP CONNECT tunnel as the default protocol.
     pub fn new(config: ProxyConfig) -> ProxyResult<Self> {
-        let connector = ProxyConnector::new(config.clone());
         let tls_manager = TlsManager::new(&config)?;
+
+        // Initialize protocol registry with HTTP CONNECT as default
+        let mut registry = ProtocolRegistry::new();
+        registry.register(Box::new(ProxyConnector::new(config.clone())));
 
         // Initialize 64 shards
         let mut shards = Vec::with_capacity(SHARDS);
@@ -57,13 +69,71 @@ impl ProxyClient {
 
         Ok(Self {
             config,
-            connector,
+            protocol_registry: registry,
+            default_protocol: ProxyProtocolType::HttpConnect,
             tls_manager,
             shards,
         })
     }
 
-    /// Connect to a target via the proxy.
+    /// Create a new proxy client with a custom protocol registry.
+    ///
+    /// Use this when you want to register additional protocols (e.g., SOCKS5)
+    /// or use a different default protocol.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut registry = ProtocolRegistry::new();
+    /// registry.register(Box::new(ProxyConnector::new(config.clone())));
+    /// registry.register(Box::new(Socks5Proxy::new(config)));
+    ///
+    /// let client = ProxyClient::with_registry(config, registry)?;
+    /// ```
+    pub fn with_registry(
+        config: ProxyConfig,
+        registry: ProtocolRegistry,
+        default_protocol: ProxyProtocolType,
+    ) -> ProxyResult<Self> {
+        let tls_manager = TlsManager::new(&config)?;
+
+        let mut shards = Vec::with_capacity(SHARDS);
+        for _ in 0..SHARDS {
+            shards.push(RwLock::new(HashMap::new()));
+        }
+
+        Ok(Self {
+            config,
+            protocol_registry: registry,
+            default_protocol,
+            tls_manager,
+            shards,
+        })
+    }
+
+    /// Register a custom proxy protocol.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// client.register_protocol(Box::new(Socks5Proxy::new(config)));
+    /// ```
+    pub fn register_protocol(&mut self, protocol: Box<dyn ProxyProtocol>) {
+        self.protocol_registry.register(protocol);
+    }
+
+    /// Set the default protocol type for new connections.
+    pub fn set_default_protocol(&mut self, protocol_type: ProxyProtocolType) -> ProxyResult<()> {
+        if self.protocol_registry.find(protocol_type).is_none() {
+            return Err(crate::error::ProxyError::InvalidResponse(format!(
+                "Protocol {protocol_type:?} not registered"
+            )));
+        }
+        self.default_protocol = protocol_type;
+        Ok(())
+    }
+
+    /// Connect to a target via the proxy using the default protocol.
     /// Reuses existing connection if available and healthy.
     pub async fn connect(&self, target: &Uri) -> ProxyResult<TlsConnection> {
         let target_key = self.get_target_key(target);
@@ -83,9 +153,19 @@ impl ProxyClient {
             }
         }
 
-        // 2. Create New Connection
-        debug!("Creating new connection for {target_key}");
-        let tcp_stream = self.connector.connect(target).await?;
+        // 2. Create New Connection using the protocol registry
+        debug!("Creating new connection for {target_key} using {}", self.default_protocol);
+        let protocol = self
+            .protocol_registry
+            .find(self.default_protocol)
+            .ok_or_else(|| {
+                crate::error::ProxyError::InvalidResponse(format!(
+                    "Default protocol {} not found in registry",
+                    self.default_protocol
+                ))
+            })?;
+
+        let tcp_stream = protocol.establish_tunnel(target).await?;
         let domain = target.host().unwrap_or("unknown");
         let tls_stream = self.tls_manager.connect(domain, tcp_stream).await?;
 
