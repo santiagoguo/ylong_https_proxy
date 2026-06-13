@@ -11,8 +11,8 @@ pub enum ProxyError {
     #[error("Authentication failed: {0}")]
     AuthFailed(String),
 
-    #[error("TLS handshake failed: {0}")]
-    Tls(#[from] rustls::Error),
+    #[error("TLS error: {0}")]
+    TlsError(String),
 
     #[error("Connection refused or closed by proxy")]
     ConnectionClosed,

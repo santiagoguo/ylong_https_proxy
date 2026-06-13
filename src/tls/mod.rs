@@ -1,60 +1,242 @@
-use crate::config::ProxyConfig;
+use crate::config::{ProxyConfig, TlsVerifyMode, TlsVersion};
 use crate::error::{ProxyError, ProxyResult};
-use rustls::pki_types::{CertificateDer, ServerName};
-use std::sync::Arc;
+use openssl::error::ErrorStack;
+use openssl::ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode};
+use openssl::x509::X509;
+use std::fs;
+use std::path::Path;
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
-use tracing::info;
+use tokio_openssl::SslStream;
+use tracing::{info, warn};
 
-/// Manages TLS configuration and handshakes
+/// Manages TLS configuration and handshakes using OpenSSL.
+///
+/// Supports:
+/// - Server certificate verification (unidirectional)
+/// - Mutual TLS / bidirectional authentication (client cert + private key)
+/// - Custom CA certificate chains
+/// - Custom cipher suites
+/// - TLS version constraints
 pub struct TlsManager {
-    client_config: Arc<rustls::ClientConfig>,
+    connector: SslConnector,
 }
 
 impl TlsManager {
-    /// Create a new TLS manager with default system roots or custom CAs
+    /// Create a new TLS manager with the given proxy configuration.
+    ///
+    /// Uses OpenSSL for all TLS operations as required by the competition spec.
     pub fn new(config: &ProxyConfig) -> ProxyResult<Self> {
-        // Explicitly install the Ring crypto provider
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let mut root_store = rustls::RootCertStore::empty();
+        let mut builder =
+            SslConnector::builder(SslMethod::tls()).map_err(map_ssl_error)?;
 
-        // Add system roots (macOS Keychain / Windows Store)
-        let native_certs = rustls_native_certs::load_native_certs();
-        for cert in native_certs.certs {
-            root_store.add(cert).map_err(|e| ProxyError::InvalidResponse(format!("Failed to add native cert: {:?}", e)))?;
+        let tls = &config.tls_config;
+
+        // --- TLS Version Constraints ---
+        set_min_tls_version(&mut builder, tls.min_tls_version)?;
+        set_max_tls_version(&mut builder, tls.max_tls_version)?;
+
+        // --- Cipher Suites ---
+        if !tls.cipher_suites.is_empty() {
+            let cipher_string = tls.cipher_suites.join(":");
+            builder
+                .set_cipher_list(&cipher_string)
+                .map_err(|e| {
+                    ProxyError::TlsError(format!("Invalid cipher suite list: {e}"))
+                })?;
+            info!("Custom cipher suites configured: {cipher_string}");
         }
 
-        // Add custom CA certs if provided
-        for cert_bytes in &config.ca_certs {
-            let cert = CertificateDer::from(cert_bytes.clone());
-            root_store.add(cert).map_err(|e| ProxyError::InvalidResponse(format!("Failed to add custom CA cert: {:?}", e)))?;
+        // --- Server Certificate Verification ---
+        match &tls.verify_mode {
+            TlsVerifyMode::Strict => {
+                builder.set_verify(SslVerifyMode::PEER);
+
+                // Load custom CA certificates
+                for ca_path in &tls.ca_cert_files {
+                    load_ca_path(&mut builder, ca_path)?;
+                }
+
+                // Also load system CA certificates if no custom CAs provided
+                if tls.ca_cert_files.is_empty() {
+                    builder
+                        .set_default_verify_paths()
+                        .map_err(|e| {
+                            ProxyError::TlsError(format!(
+                                "Failed to load system CA certs: {e}"
+                            ))
+                        })?;
+                }
+
+                info!("TLS verification enabled (Strict mode), CA certs loaded");
+            }
+            TlsVerifyMode::None => {
+                builder.set_verify(SslVerifyMode::NONE);
+                warn!("TLS verification DISABLED (None mode) — not recommended for production");
+            }
         }
 
-        // Build ClientConfig
-        // Note: Session Resumption API in rustls 0.23 might have changed or requires specific imports.
-        // For now, we use the standard config. The connection pool optimization (W24) 
-        // already provides significant performance gains by reusing connections.
-        let client_config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
+        // --- Mutual TLS (Bidirectional Authentication) ---
+        if let (Some(cert_path), Some(key_path)) =
+            (&tls.client_cert_file, &tls.client_key_file)
+        {
+            builder
+                .set_certificate_file(cert_path, SslFiletype::PEM)
+                .map_err(|e| {
+                    ProxyError::TlsError(format!(
+                        "Failed to load client certificate from {}: {e}",
+                        cert_path.display()
+                    ))
+                })?;
+
+            builder
+                .set_private_key_file(key_path, SslFiletype::PEM)
+                .map_err(|e| {
+                    ProxyError::TlsError(format!(
+                        "Failed to load client private key from {}: {e}",
+                        key_path.display()
+                    ))
+                })?;
+
+            builder
+                .check_private_key()
+                .map_err(|e| {
+                    ProxyError::TlsError(format!("Client cert/key mismatch: {e}"))
+                })?;
+
+            info!(
+                "Mutual TLS configured: cert={}, key={}",
+                cert_path.display(),
+                key_path.display()
+            );
+        }
 
         Ok(Self {
-            client_config: Arc::new(client_config),
+            connector: builder.build(),
         })
     }
 
-    /// Upgrade a raw TCP stream to a TLS stream
-    pub async fn connect(&self, domain: &str, stream: TcpStream) -> ProxyResult<TlsStream<TcpStream>> {
-        info!("Starting TLS handshake for {}", domain);
-        
-        let server_name = ServerName::try_from(domain.to_string())
-            .map_err(|_| ProxyError::InvalidUrl(format!("Invalid domain: {}", domain)))?
-            .to_owned();
+    /// Upgrade a raw TCP stream to a TLS stream by performing the OpenSSL handshake.
+    ///
+    /// Uses SNI (Server Name Indication) with the target domain name.
+    pub async fn connect(
+        &self,
+        domain: &str,
+        stream: TcpStream,
+    ) -> ProxyResult<SslStream<TcpStream>> {
+        info!("Starting OpenSSL TLS handshake for {domain}");
 
-        let connector = tokio_rustls::TlsConnector::from(self.client_config.clone());
-        let tls_stream = connector.connect(server_name, stream).await?;
-        
-        info!("TLS handshake successful for {}", domain);
-        Ok(tls_stream)
+        // Build an SSL session object with SNI
+        let ssl = self
+            .connector
+            .configure()
+            .map_err(map_ssl_error)?
+            .into_ssl(domain)
+            .map_err(map_ssl_error)?;
+
+        // Create the SslStream and perform the handshake
+        let mut ssl_stream =
+            SslStream::new(ssl, stream).map_err(|e| {
+                ProxyError::TlsError(format!("Failed to create SSL stream: {e}"))
+            })?;
+
+        // Perform the TLS handshake
+        SslStream::connect(std::pin::Pin::new(&mut ssl_stream))
+            .await
+            .map_err(|e| {
+                ProxyError::TlsError(format!("TLS handshake failed for {domain}: {e}"))
+            })?;
+
+        info!("OpenSSL TLS handshake successful for {domain}");
+        Ok(ssl_stream)
     }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Load CA certificates from a file or directory.
+fn load_ca_path(
+    builder: &mut openssl::ssl::SslConnectorBuilder,
+    path: &Path,
+) -> ProxyResult<()> {
+    if path.is_dir() {
+        builder
+            .set_default_verify_paths()
+            .map_err(|e| {
+                ProxyError::TlsError(format!("Failed to set verify paths: {e}"))
+            })?;
+        info!("Loaded CA certificates from directory: {}", path.display());
+    } else if path.is_file() {
+        let cert_bytes = fs::read(path).map_err(|e| {
+            ProxyError::TlsError(format!(
+                "Failed to read CA cert file {}: {e}",
+                path.display()
+            ))
+        })?;
+        let certs = X509::stack_from_pem(&cert_bytes).map_err(|e| {
+            ProxyError::TlsError(format!(
+                "Failed to parse CA cert file {}: {e}",
+                path.display()
+            ))
+        })?;
+        for cert in certs {
+            builder
+                .cert_store_mut()
+                .add_cert(cert)
+                .map_err(|e| ProxyError::TlsError(format!("Failed to add CA cert: {e}")))?;
+        }
+        info!("Loaded CA certificates from file: {}", path.display());
+    } else {
+        return Err(ProxyError::TlsError(format!(
+            "CA cert path does not exist: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Set the minimum TLS version on the connector builder.
+fn set_min_tls_version(
+    builder: &mut openssl::ssl::SslConnectorBuilder,
+    version: TlsVersion,
+) -> ProxyResult<()> {
+    #[allow(deprecated)]
+    let min = match version {
+        TlsVersion::Tlsv10 => openssl::ssl::SslVersion::TLS1,
+        TlsVersion::Tlsv11 => openssl::ssl::SslVersion::TLS1_1,
+        TlsVersion::Tlsv12 => openssl::ssl::SslVersion::TLS1_2,
+        TlsVersion::Tlsv13 => openssl::ssl::SslVersion::TLS1_3,
+    };
+    builder
+        .set_min_proto_version(Some(min))
+        .map_err(|e| {
+            ProxyError::TlsError(format!("Failed to set min TLS version: {e}"))
+        })?;
+    Ok(())
+}
+
+/// Set the maximum TLS version on the connector builder.
+fn set_max_tls_version(
+    builder: &mut openssl::ssl::SslConnectorBuilder,
+    version: TlsVersion,
+) -> ProxyResult<()> {
+    #[allow(deprecated)]
+    let max = match version {
+        TlsVersion::Tlsv10 => openssl::ssl::SslVersion::TLS1,
+        TlsVersion::Tlsv11 => openssl::ssl::SslVersion::TLS1_1,
+        TlsVersion::Tlsv12 => openssl::ssl::SslVersion::TLS1_2,
+        TlsVersion::Tlsv13 => openssl::ssl::SslVersion::TLS1_3,
+    };
+    builder
+        .set_max_proto_version(Some(max))
+        .map_err(|e| {
+            ProxyError::TlsError(format!("Failed to set max TLS version: {e}"))
+        })?;
+    Ok(())
+}
+
+/// Map an OpenSSL ErrorStack to a ProxyError.
+fn map_ssl_error(e: ErrorStack) -> ProxyError {
+    ProxyError::TlsError(format!("OpenSSL error: {e}"))
 }

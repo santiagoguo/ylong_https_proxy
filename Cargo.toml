@@ -9,17 +9,17 @@ license = "Apache-2.0"
 tokio = { version = "1", features = ["full", "tracing"] }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
-rustls = { version = "0.23", features = ["ring", "logging", "std"] }
-tokio-rustls = "0.26"
-rustls-native-certs = "0.8"
+openssl = { version = "0.10" }
+tokio-openssl = "0.6"
 http = "1.1"
 url = "2.5"
 base64 = "0.22"
-webpki-roots = "0.26"
 deadpool = { version = "0.12", features = ["rt_tokio_1"] }
 async-trait = "0.1"
 tracing = "0.1"
 thiserror = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 tokio-test = "0.4"

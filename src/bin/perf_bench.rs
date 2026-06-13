@@ -7,14 +7,14 @@
 
 use http::Uri;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use url::Url;
 use ylong_https_proxy::config::ProxyConfig;
 use ylong_https_proxy::proxy::ProxyConnector;
-use std::time::Instant;
-use std::sync::Arc;
 
 /// A mock proxy server that accepts CONNECT and replies 200 OK
 async fn run_mock_proxy(addr: SocketAddr) -> std::io::Result<()> {
@@ -61,18 +61,20 @@ async fn run_bench(concurrency: usize, connector: Arc<ProxyConnector>) {
 
     if success_count > 0 {
         let avg = total_time / success_count;
-        println!("  Concurrency: {} | Avg Time: {:?} | Success: {}/{}", 
-                 concurrency, avg, success_count, concurrency);
+        println!(
+            "  Concurrency: {} | Avg Time: {:?} | Success: {}/{}",
+            concurrency, avg, success_count, concurrency
+        );
     }
 }
 
 fn main() {
     println!("🚀 Starting ylong_https_proxy Performance Benchmark...");
-    
+
     let rt = Runtime::new().unwrap();
     let port = 19999;
     let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-    
+
     // Start mock server
     rt.spawn(run_mock_proxy(addr));
     std::thread::sleep(std::time::Duration::from_millis(500));

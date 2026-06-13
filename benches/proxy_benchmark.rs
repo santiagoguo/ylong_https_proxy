@@ -3,7 +3,7 @@
 //! Measures overhead of `ProxyConnector::connect()` under various concurrency levels
 //! using a mock TCP proxy server.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use futures::future::join_all;
 use http::Uri;
 use std::net::SocketAddr;
@@ -37,13 +37,13 @@ async fn run_mock_proxy(addr: SocketAddr) -> std::io::Result<()> {
 
 fn proxy_connect_benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
-    
+
     // Start mock proxy on a fixed port
     let port = 19998;
     let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-    
+
     rt.spawn(run_mock_proxy(addr));
-    
+
     // Give server a moment to bind
     std::thread::sleep(std::time::Duration::from_millis(200));
 
@@ -56,26 +56,32 @@ fn proxy_connect_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("proxy_connect_async");
     group.sample_size(10);
     group.measurement_time(std::time::Duration::from_secs(2));
-    
+
     for concurrency in [1, 10, 50] {
-        group.bench_with_input(BenchmarkId::from_parameter(concurrency), &concurrency, |b, &conc| {
-            b.iter(|| {
-                rt.block_on(async {
-                    let target: Uri = "https://example.com:443".parse().unwrap();
-                    let tasks: Vec<_> = (0..conc).map(|_| {
-                        let c = &connector;
-                        let t = target.clone();
-                        async move {
-                            let res = c.connect(black_box(&t)).await;
-                            if res.is_err() {
-                                eprintln!("Connect failed: {:?}", res);
-                            }
-                        }
-                    }).collect();
-                    join_all(tasks).await;
-                })
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(concurrency),
+            &concurrency,
+            |b, &conc| {
+                b.iter(|| {
+                    rt.block_on(async {
+                        let target: Uri = "https://example.com:443".parse().unwrap();
+                        let tasks: Vec<_> = (0..conc)
+                            .map(|_| {
+                                let c = &connector;
+                                let t = target.clone();
+                                async move {
+                                    let res = c.connect(black_box(&t)).await;
+                                    if res.is_err() {
+                                        eprintln!("Connect failed: {:?}", res);
+                                    }
+                                }
+                            })
+                            .collect();
+                        join_all(tasks).await;
+                    })
+                });
+            },
+        );
     }
     group.finish();
 }

@@ -30,13 +30,14 @@ where
 
 /// Creates a connected pair of streams for testing purposes.
 /// In a real benchmark, this would be a TCP connection to a mock proxy.
-pub async fn create_test_pair() -> io::Result<(impl AsyncRead + AsyncWrite, impl AsyncRead + AsyncWrite)> {
+pub async fn create_test_pair()
+-> io::Result<(impl AsyncRead + AsyncWrite, impl AsyncRead + AsyncWrite)> {
     use tokio::net::TcpListener;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
-    
+
     let client = tokio::net::TcpStream::connect(addr).await?;
     let (server, _) = listener.accept().await?;
-    
+
     Ok((client, server))
 }
