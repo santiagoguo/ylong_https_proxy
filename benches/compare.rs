@@ -47,11 +47,11 @@ fn proxy_client_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-/// Performance Note for Competition:
-/// ylong_https_proxy achieves >20% improvement over libcurl by:
-/// 1. Async I/O (no thread-per-connection overhead)
-/// 2. Zero-copy stream forwarding (copy_bidirectional)
-/// 3. Connection pooling (amortizes TCP+TLS handshake costs)
+// Performance Note for Competition:
+// ylong_https_proxy achieves >20% improvement over libcurl by:
+// 1. Async I/O (no thread-per-connection overhead)
+// 2. Zero-copy stream forwarding (copy_bidirectional)
+// 3. Connection pooling (amortizes TCP+TLS handshake costs)
 
 criterion_group!(benches, proxy_client_benchmark);
 criterion_main!(benches);

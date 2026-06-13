@@ -24,11 +24,7 @@ async fn run_mock_proxy(addr: SocketAddr) -> std::io::Result<()> {
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             let mut headers = Vec::new();
-            loop {
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) => n,
-                    Err(_) => break,
-                };
+            while let Ok(n) = stream.read(&mut buf).await {
                 headers.extend_from_slice(&buf[..n]);
                 if headers.windows(4).position(|w| w == b"\r\n\r\n").is_some() {
                     let response = b"HTTP/1.1 200 Connection Established\r\n\r\n";

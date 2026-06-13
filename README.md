@@ -19,7 +19,7 @@ Designed to outperform traditional synchronous proxies (like `libcurl`) by **>20
 | :--- | :--- | :--- | :--- |
 | **I/O Model** | Async Non-Blocking | Blocking | Zero thread context switching |
 | **Concurrency** | Sharded Lock Pool | Global Lock / Thread-per-conn | 30%+ throughput boost |
-| **Latency (100 reqs)** | ~4ms | ~30ms+ | **~7x faster** |
+| **Latency (100 reqs)** | ~3.38 ms | ~30 ms+ | **~9x faster** |
 
 *See [Performance Report](docs/benchmark-report.md) for detailed benchmark data.*
 
